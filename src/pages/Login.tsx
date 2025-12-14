@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -91,10 +91,9 @@ const Login: React.FC = () => {
           <Typography variant="body2" color="textSecondary">
             Нет аккаунта?{' '}
             <Link
-              component="button"
-              variant="body2"
-              onClick={() => navigate('/register')}
-              sx={{ textDecoration: 'none' }}
+              component={RouterLink}
+              to="/register"
+              sx={{ textDecoration: 'none', fontWeight: 500 }}
             >
               Зарегистрироваться
             </Link>

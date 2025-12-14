@@ -10,7 +10,8 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; user?: User }>;
+  register: (username: string, email: string, password: string) => Promise<{ success: boolean; error?: string; user?: User }>;
   logout: () => void;
   loading: boolean;
 }
@@ -42,29 +43,109 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setLoading(false);
   }, []);
 
+  const fetchUserProfile = async (token: string): Promise<User | null> => {
+    try {
+      const response = await axios.get('http://localhost:8080/api/profile', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      return {
+        id: response.data.id,
+        email: response.data.email,
+        role: response.data.role as 'USER' | 'ADMIN',
+        username: response.data.username,
+      };
+    } catch (error) {
+      console.error('Ошибка загрузки профиля:', error);
+      return null;
+    }
+  };
+
   const login = async (email: string, password: string) => {
     try {
-      const response = await axios.post('http://localhost:8080/api/auth/login', {
+      const loginResponse = await axios.post('http://localhost:8080/api/auth/login', {
         email,
         password
       });
 
+      // Получаем полный профиль пользователя
+      const userProfile = await fetchUserProfile(loginResponse.data.token);
+
+      if (!userProfile) {
+        return {
+          success: false,
+          error: 'Не удалось получить данные пользователя'
+        };
+      }
+
       const userData: User = {
-        id: 1,
-        email: response.data.email,
-        role: response.data.role as 'USER' | 'ADMIN',
-        username: email.split('@')[0]
+        id: userProfile.id,
+        email: userProfile.email,
+        role: userProfile.role,
+        username: userProfile.username || email.split('@')[0]
       };
 
-      localStorage.setItem('cinema_token', response.data.token);
+      localStorage.setItem('cinema_token', loginResponse.data.token);
       localStorage.setItem('cinema_user', JSON.stringify(userData));
       setUser(userData);
 
-      return { success: true };
+      return {
+        success: true,
+        user: userData
+      };
     } catch (error: any) {
       return {
         success: false,
         error: error.response?.data?.error || 'Ошибка входа'
+      };
+    }
+  };
+
+  const register = async (username: string, email: string, password: string) => {
+    try {
+      await axios.post('http://localhost:8080/api/auth/register', {
+        username,
+        email,
+        password,
+      });
+
+      // Автоматический вход после регистрации
+      const loginResponse = await axios.post('http://localhost:8080/api/auth/login', {
+        email,
+        password,
+      });
+
+      // Получаем полный профиль пользователя
+      const userProfile = await fetchUserProfile(loginResponse.data.token);
+
+      if (!userProfile) {
+        return {
+          success: false,
+          error: 'Не удалось получить данные пользователя'
+        };
+      }
+
+      const userData: User = {
+        id: userProfile.id,
+        email: userProfile.email,
+        role: userProfile.role,
+        username: userProfile.username || username
+      };
+
+      localStorage.setItem('cinema_token', loginResponse.data.token);
+      localStorage.setItem('cinema_user', JSON.stringify(userData));
+      setUser(userData);
+
+      return {
+        success: true,
+        user: userData
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.error || 'Ошибка регистрации'
       };
     }
   };
@@ -76,7 +157,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, register, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

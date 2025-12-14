@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Container,
@@ -8,15 +8,14 @@ import {
   Button,
   Alert,
   CircularProgress,
-  TextField,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  Grid
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import axios from "axios";
 import { useAuth } from "../contexts/AuthContext";
+import SeatSelector from "../components/SeatSelector";
 
 const BookingPage: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -26,58 +25,149 @@ const BookingPage: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [ticketsCount, setTicketsCount] = useState(1);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   const [isBooking, setIsBooking] = useState(false);
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [hallInfo, setHallInfo] = useState<{ rows: number; seatsPerRow: number } | null>(null);
+  const [refreshSeats, setRefreshSeats] = useState(0);
 
-  useEffect(() => {
-    fetchSession();
-  }, [sessionId]);
+  const fetchHallInfo = useCallback(async (hallId: number) => {
+    try {
+      const response = await axios.get(`http://localhost:8080/api/halls/${hallId}`);
+      setHallInfo({
+        rows: response.data.rows || 10,
+        seatsPerRow: response.data.seatsPerRow || 15,
+      });
+    } catch (err) {
+      console.error("Ошибка загрузки информации о зале:", err);
+      setHallInfo({ rows: 10, seatsPerRow: 15 });
+    }
+  }, []);
 
-  const fetchSession = async () => {
+  const fetchSession = useCallback(async () => {
     try {
       setLoading(true);
       const response = await axios.get(`http://localhost:8080/api/sessions/${sessionId}`);
       setSession(response.data);
+
+      if (response.data.hallId) {
+        await fetchHallInfo(response.data.hallId);
+      }
     } catch (err: any) {
       console.error("Ошибка загрузки сеанса:", err);
       setError("Не удалось загрузить информацию о сеансе");
     } finally {
       setLoading(false);
     }
+  }, [sessionId, fetchHallInfo]);
+
+  useEffect(() => {
+    fetchSession();
+  }, [fetchSession]);
+
+  const handleSeatsChange = (seats: string[]) => {
+    setSelectedSeats(seats);
   };
 
-  const handleBooking = async () => {
+  const handleBookingClick = () => {
     if (!user) {
       alert("Пожалуйста, войдите в систему для бронирования");
       navigate("/login");
       return;
     }
 
-    if (ticketsCount < 1) {
-      alert("Выберите хотя бы один билет");
+    if (selectedSeats.length === 0) {
+      alert("Выберите хотя бы одно место");
       return;
     }
 
+    setConfirmationOpen(true);
+  };
+
+  const handleBookingConfirm = async () => {
+    if (!user) return;
+
     setIsBooking(true);
+    setConfirmationOpen(false);
+
     try {
-      const bookingData = {
-        userId: user.id,
-        sessionId: parseInt(sessionId || "0"),
-        ticketsCount,
-        seats: selectedSeats,
-        totalPrice: (session?.price || 0) * ticketsCount
-      };
+      const token = localStorage.getItem('cinema_token');
+      if (!token) {
+        throw new Error("Токен не найден");
+      }
 
-      // Здесь будет вызов API для создания билетов
-      console.log("Данные бронирования:", bookingData);
+      const ticketsData = selectedSeats.map(seat => {
+        const [row, seatNum] = seat.split('-').map(Number);
+        return {
+          userId: user.id,
+          sessionId: parseInt(sessionId || "0"),
+          rowNumber: row,
+          seatNumber: seatNum,
+        };
+      });
 
-      alert(`Бронирование успешно!\nБилетов: ${ticketsCount}\nСумма: ${bookingData.totalPrice} руб.`);
-      navigate("/profile");
+      // Создаем билеты по одному
+      const createdTickets = [];
+      for (const ticketData of ticketsData) {
+        try {
+          const response = await axios.post(
+            'http://localhost:8080/api/tickets',
+            ticketData,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+          createdTickets.push(response.data);
+        } catch (ticketError: any) {
+          console.error(`Ошибка создания билета для места ${ticketData.rowNumber}-${ticketData.seatNumber}:`, ticketError);
+
+          // Проверяем, если место уже занято
+          if (ticketError.response?.status === 400 || ticketError.response?.status === 409) {
+            throw new Error(`Место ${ticketData.rowNumber}-${ticketData.seatNumber} уже занято или недоступно.`);
+          }
+          throw ticketError;
+        }
+      }
+
+      alert(`Бронирование успешно!\nКуплено билетов: ${createdTickets.length}\nСумма: ${(session?.price || 0) * createdTickets.length} руб.`);
+
+      // Обновляем кэш
+      setRefreshSeats(prev => prev + 1);
+      setSelectedSeats([]);
+
+      // Немедленное обновление данных
+      await fetchSession();
+
+      setTimeout(() => {
+        navigate("/profile");
+      }, 1000);
 
     } catch (err: any) {
       console.error("Ошибка бронирования:", err);
-      alert("Ошибка при бронировании. Попробуйте снова.");
+
+      let errorMessage = "Ошибка при бронировании. Попробуйте снова.";
+
+      if (err.message && err.message.includes("уже занято")) {
+        errorMessage = err.message;
+      } else if (err.response?.data) {
+        if (typeof err.response.data === 'string') {
+          errorMessage = err.response.data;
+        } else if (err.response.data.message) {
+          errorMessage = err.response.data.message;
+        } else if (err.response.data.error) {
+          errorMessage = err.response.data.error;
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+
+      alert(errorMessage);
+
+      // Обновляем данные после ошибки
+      await fetchSession();
     } finally {
       setIsBooking(false);
     }
@@ -104,15 +194,17 @@ const BookingPage: React.FC = () => {
     );
   }
 
+  const totalPrice = (session?.price || 0) * selectedSeats.length;
+
   return (
-    <Container maxWidth="md">
+    <Container maxWidth="lg">
       <Typography variant="h4" component="h1" gutterBottom>
         Бронирование билетов
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h5" gutterBottom>
-          {session.movieTitle}
+          {session.movieTitle || "Фильм"}
         </Typography>
         <Typography color="textSecondary" paragraph>
           Кинотеатр: {session.cinemaName || "Не указан"} • Зал: {session.hallName || "Не указан"}
@@ -121,47 +213,64 @@ const BookingPage: React.FC = () => {
           Время: {new Date(session.startTime).toLocaleString("ru-RU")}
         </Typography>
         <Typography variant="h6" color="primary">
-          Цена за билет: {session.price} руб.
+          Цена за билет: {session.price || 0} руб.
         </Typography>
       </Paper>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Выбор билетов
+          Выбор мест
         </Typography>
 
-        <FormControl fullWidth sx={{ mb: 3 }}>
-          <InputLabel>Количество билетов</InputLabel>
-          <Select
-            value={ticketsCount}
-            label="Количество билетов"
-            onChange={(e) => setTicketsCount(Number(e.target.value))}
-          >
-            {[1, 2, 3, 4, 5, 6].map((num) => (
-              <MenuItem key={num} value={num}>
-                {num} {num === 1 ? "билет" : num < 5 ? "билета" : "билетов"}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        <Typography variant="body2" color="textSecondary">
-          * Выбор конкретных мест будет доступен на следующем этапе разработки
-        </Typography>
+        {hallInfo ? (
+          <SeatSelector
+            sessionId={parseInt(sessionId || "0")}
+            hallRows={hallInfo.rows}
+            hallSeatsPerRow={hallInfo.seatsPerRow}
+            onSeatsChange={handleSeatsChange}
+            initialSelectedSeats={selectedSeats}
+            refreshTrigger={refreshSeats}
+          />
+        ) : (
+          <Box display="flex" justifyContent="center" p={3}>
+            <CircularProgress />
+          </Box>
+        )}
       </Paper>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
           Итог
         </Typography>
+
         <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
-          <Typography>Билеты:</Typography>
-          <Typography>{ticketsCount} × {session.price} руб.</Typography>
+          <Typography>Выбрано мест:</Typography>
+          <Typography>{selectedSeats.length}</Typography>
         </Box>
-        <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+
+        <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
+          <Typography>Цена за билет:</Typography>
+          <Typography>{session.price || 0} руб.</Typography>
+        </Box>
+
+        {selectedSeats.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" color="textSecondary">
+              Выбранные места:
+            </Typography>
+            <Typography variant="body2" color="textSecondary">
+              {selectedSeats.map(seat => {
+                const [row, seatNum] = seat.split('-');
+                return `Ряд ${row}, Место ${seatNum}`;
+              }).join(', ')}
+            </Typography>
+          </Box>
+        )}
+
+        <Box sx={{ display: "flex", justifyContent: "space-between", pt: 2, borderTop: 1, borderColor: 'divider' }}>
           <Typography variant="h6">К оплате:</Typography>
           <Typography variant="h5" color="primary">
-            {(session.price * ticketsCount).toFixed(2)} руб.
+            {totalPrice.toFixed(2)} руб.
           </Typography>
         </Box>
       </Paper>
@@ -170,8 +279,8 @@ const BookingPage: React.FC = () => {
         <Button
           variant="contained"
           size="large"
-          onClick={handleBooking}
-          disabled={isBooking}
+          onClick={handleBookingClick}
+          disabled={isBooking || selectedSeats.length === 0}
           sx={{ flex: 1, py: 1.5 }}
         >
           {isBooking ? (
@@ -192,6 +301,41 @@ const BookingPage: React.FC = () => {
           Отмена
         </Button>
       </Box>
+
+      <Dialog open={confirmationOpen} onClose={() => setConfirmationOpen(false)}>
+        <DialogTitle>Подтверждение бронирования</DialogTitle>
+        <DialogContent>
+          <Typography paragraph>
+            Вы уверены, что хотите забронировать {selectedSeats.length} билет(а/ов)?
+          </Typography>
+          <Typography paragraph>
+            Фильм: <strong>{session.movieTitle}</strong>
+          </Typography>
+          <Typography paragraph>
+            Время: {new Date(session.startTime).toLocaleString("ru-RU")}
+          </Typography>
+          <Typography paragraph>
+            Выбранные места:{" "}
+            {selectedSeats.map(seat => {
+              const [row, seatNum] = seat.split('-');
+              return `Ряд ${row}, Место ${seatNum}`;
+            }).join(', ')}
+          </Typography>
+          <Typography variant="h6" color="primary">
+            Итого: {totalPrice.toFixed(2)} руб.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmationOpen(false)}>Отмена</Button>
+          <Button
+            variant="contained"
+            onClick={handleBookingConfirm}
+            color="primary"
+          >
+            Подтвердить
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };

@@ -11,6 +11,10 @@ import Admin from './pages/Admin';
 import Movies from './pages/Movies';
 import Sessions from './pages/Sessions';
 import Booking from './pages/Booking';
+import AdminSessions from './pages/AdminSessions';
+import AdminUsers from './pages/AdminUsers';
+import AdminCinemas from './pages/AdminCinemas';
+import AdminHalls from './pages/AdminHalls';
 
 const theme = createTheme({
   palette: {
@@ -35,6 +39,10 @@ function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/admin" element={<Admin />} />
+              <Route path="/admin/sessions" element={<AdminSessions />} />
+              <Route path="/admin/users" element={<AdminUsers />} />
+              <Route path="/admin/cinemas" element={<AdminCinemas />} />
+              <Route path="/admin/halls" element={<AdminHalls />} />
             </Routes>
           </Layout>
         </Router>

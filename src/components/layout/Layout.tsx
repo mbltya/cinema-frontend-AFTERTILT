@@ -1,7 +1,7 @@
 import React from 'react';
 import { AppBar, Toolbar, Typography, Button, Box, Container } from '@mui/material';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext'; // ПРАВИЛЬНЫЙ ПУТЬ!
+import { useAuth } from '../../contexts/AuthContext';
 import LocalMoviesIcon from '@mui/icons-material/LocalMovies';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -37,7 +37,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 <Button color="inherit" component={RouterLink} to="/profile">
                   Профиль
                 </Button>
-                {user.role === 'ADMIN' && (
+                {user && user.role === 'ADMIN' && (
                   <Button color="inherit" component={RouterLink} to="/admin">
                     Админ
                   </Button>
