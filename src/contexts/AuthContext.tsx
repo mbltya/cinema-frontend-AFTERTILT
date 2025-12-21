@@ -14,6 +14,7 @@ interface AuthContextType {
   register: (username: string, email: string, password: string) => Promise<{ success: boolean; error?: string; user?: User }>;
   logout: () => void;
   loading: boolean;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -63,6 +64,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const refreshUser = async () => {
+    const token = localStorage.getItem('cinema_token');
+    if (!token) return;
+
+    try {
+      const userProfile = await fetchUserProfile(token);
+      if (userProfile) {
+        localStorage.setItem('cinema_user', JSON.stringify(userProfile));
+        setUser(userProfile);
+      }
+    } catch (error) {
+      console.error('Ошибка обновления пользователя:', error);
+    }
+  };
+
   const login = async (email: string, password: string) => {
     try {
       const loginResponse = await axios.post('http://localhost:8080/api/auth/login', {
@@ -70,7 +86,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         password
       });
 
-      // Получаем полный профиль пользователя
       const userProfile = await fetchUserProfile(loginResponse.data.token);
 
       if (!userProfile) {
@@ -111,13 +126,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         password,
       });
 
-      // Автоматический вход после регистрации
       const loginResponse = await axios.post('http://localhost:8080/api/auth/login', {
         email,
         password,
       });
 
-      // Получаем полный профиль пользователя
       const userProfile = await fetchUserProfile(loginResponse.data.token);
 
       if (!userProfile) {
@@ -157,7 +170,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, register, logout, loading, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

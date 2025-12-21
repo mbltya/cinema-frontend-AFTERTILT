@@ -14,9 +14,12 @@ import {
   Divider,
   Alert,
   CircularProgress,
-  TextField,
   Snackbar,
   IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   Edit,
@@ -27,10 +30,13 @@ import {
   AccessTime,
   Settings,
   Close,
+  Cancel,
+  Refresh,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import CancelBookingDialog from '../components/booking/CancelBookingDialog';
 
 interface Booking {
   id: number;
@@ -39,10 +45,11 @@ interface Booking {
   time: string;
   seats: string[];
   price: number;
-  status: 'active' | 'completed' | 'cancelled';
+  status: 'active' | 'completed' | 'cancelled' | 'pending';
   cinema: string;
   hall: string;
   sessionId: number;
+  ticketId?: number;
 }
 
 interface TabPanelProps {
@@ -61,22 +68,18 @@ function TabPanel(props: TabPanelProps) {
 }
 
 const Profile: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [tabValue, setTabValue] = useState(0);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState({
-    username: user?.username || 'Пользователь',
-    email: user?.email || '',
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    type: 'success' as 'success' | 'error'
   });
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', type: 'success' as 'success' | 'error' });
-  const [passwordData, setPasswordData] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
-  });
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
 
   const fetchBookings = useCallback(async () => {
     if (!user) return;
@@ -97,17 +100,18 @@ const Profile: React.FC = () => {
         }
       );
 
-      console.log('Данные билетов:', response.data); // Для отладки
+      console.log('Данные билетов:', response.data);
 
       const bookingsData: Booking[] = response.data.map((ticket: any) => {
         const sessionTime = ticket.sessionTime || ticket.purchaseTime;
         return {
           id: ticket.id,
+          ticketId: ticket.id,
           movieTitle: ticket.movieTitle || 'Неизвестный фильм',
           date: new Date(sessionTime).toLocaleDateString('ru-RU'),
           time: new Date(sessionTime).toLocaleTimeString('ru-RU', {
             hour: '2-digit',
-            minute: '2-digit'
+            minute: '2-digit',
           }),
           seats: ticket.rowNumber && ticket.seatNumber
             ? [`Ряд ${ticket.rowNumber}, Место ${ticket.seatNumber}`]
@@ -123,9 +127,13 @@ const Profile: React.FC = () => {
       setBookings(bookingsData);
     } catch (error) {
       console.error('Ошибка загрузки бронирований:', error);
-      setSnackbar({ open: true, message: 'Ошибка загрузки бронирований', type: 'error' });
+      setSnackbar({
+        open: true,
+        message: 'Ошибка загрузки бронирований',
+        type: 'error'
+      });
 
-      // Fallback: показываем mock данные для отладки
+      // Fallback данные для демонстрации
       const mockBookings: Booking[] = [
         {
           id: 1,
@@ -139,6 +147,18 @@ const Profile: React.FC = () => {
           hall: 'Зал 1',
           sessionId: 1,
         },
+        {
+          id: 2,
+          movieTitle: 'Дюна: Часть вторая',
+          date: '16.12.2024',
+          time: '20:00',
+          seats: ['Ряд 7, Место 8'],
+          price: 1500,
+          status: 'active',
+          cinema: 'Кинотеатр "Октябрь"',
+          hall: 'Зал 3',
+          sessionId: 2,
+        },
       ];
       setBookings(mockBookings);
     } finally {
@@ -150,7 +170,7 @@ const Profile: React.FC = () => {
     fetchBookings();
   }, [fetchBookings]);
 
-  const mapTicketStatus = (status: string): 'active' | 'completed' | 'cancelled' => {
+  const mapTicketStatus = (status: string): Booking['status'] => {
     if (!status) return 'active';
 
     switch (status.toUpperCase()) {
@@ -175,82 +195,39 @@ const Profile: React.FC = () => {
     navigate('/');
   };
 
-  const handleSave = async () => {
-    if (!user) return;
-
-    try {
-      const token = localStorage.getItem('cinema_token');
-      await axios.put(
-        `http://localhost:8080/api/users/${user.id}`,
-        editData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      setIsEditing(false);
-      setSnackbar({ open: true, message: 'Профиль успешно обновлен', type: 'success' });
-    } catch (error) {
-      console.error('Ошибка обновления профиля:', error);
-      setSnackbar({ open: true, message: 'Ошибка обновления профиля', type: 'error' });
-    }
-  };
-
-  const handleCancel = () => {
-    setIsEditing(false);
-    setEditData({
-      username: user?.username || 'Пользователь',
-      email: user?.email || '',
-    });
-  };
-
-  const handleChangePassword = async () => {
-    if (passwordData.newPassword !== passwordData.confirmPassword) {
-      setSnackbar({ open: true, message: 'Пароли не совпадают', type: 'error' });
-      return;
-    }
-
-    if (passwordData.newPassword.length < 6) {
-      setSnackbar({ open: true, message: 'Новый пароль должен содержать минимум 6 символов', type: 'error' });
-      return;
-    }
-
-    try {
-      const token = localStorage.getItem('cinema_token');
-      await axios.put(
-        `http://localhost:8080/api/users/${user?.id}`,
-        {
-          password: passwordData.newPassword,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      setPasswordData({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
-      });
-      setSnackbar({ open: true, message: 'Пароль успешно изменен', type: 'success' });
-    } catch (error) {
-      console.error('Ошибка смены пароля:', error);
-      setSnackbar({ open: true, message: 'Ошибка смены пароля', type: 'error' });
-    }
-  };
-
   const handleCloseSnackbar = () => {
     setSnackbar({ ...snackbar, open: false });
   };
 
   const handleRefreshBookings = () => {
     fetchBookings();
-    setSnackbar({ open: true, message: 'Список бронирований обновлен', type: 'success' });
+    setSnackbar({
+      open: true,
+      message: 'Список бронирований обновлен',
+      type: 'success'
+    });
   };
+
+  const handleCancelClick = (booking: Booking) => {
+    setSelectedBooking(booking);
+    setCancelDialogOpen(true);
+  };
+
+  const handleCancelSuccess = () => {
+    fetchBookings();
+    refreshUser(); // Обновляем данные пользователя
+    setSnackbar({
+      open: true,
+      message: 'Бронирование успешно отменено',
+      type: 'success'
+    });
+  };
+
+  const activeBookings = bookings.filter(b => b.status === 'active');
+  const cancelledBookings = bookings.filter(b => b.status === 'cancelled');
+  const totalSpent = bookings
+    .filter(b => b.status !== 'cancelled')
+    .reduce((sum, booking) => sum + booking.price, 0);
 
   if (!user) {
     return (
@@ -269,12 +246,9 @@ const Profile: React.FC = () => {
     );
   }
 
-  const activeBookings = bookings.filter(b => b.status === 'active');
-  const totalSpent = bookings.reduce((sum, booking) => sum + booking.price, 0);
-
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" gutterBottom align="center">
+      <Typography variant="h4" gutterBottom align="center" sx={{ color: '#fff' }}>
         Мой профиль
       </Typography>
 
@@ -283,11 +257,12 @@ const Profile: React.FC = () => {
         flexDirection: { xs: 'column', md: 'row' },
         gap: 4,
       }}>
+        {/* Левая колонка - информация профиля */}
         <Box sx={{
           width: { xs: '100%', md: '35%' },
           minWidth: { md: 300 },
         }}>
-          <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
+          <Paper elevation={3} sx={{ p: 3, mb: 3, background: '#1F2128' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
               <Avatar
                 sx={{
@@ -295,139 +270,149 @@ const Profile: React.FC = () => {
                   height: 80,
                   mr: 3,
                   fontSize: '2rem',
-                  bgcolor: 'primary.main',
+                  background: 'linear-gradient(135deg, #FF3A44, #4ECDC4)',
+                  color: '#fff',
+                  fontWeight: 700,
                 }}
               >
                 {user.username?.charAt(0).toUpperCase() || 'U'}
               </Avatar>
               <Box>
-                <Typography variant="h5">{user.username || 'Пользователь'}</Typography>
-                <Typography color="textSecondary">
+                <Typography variant="h5" sx={{ color: '#fff' }}>
+                  {user.username || 'Пользователь'}
+                </Typography>
+                <Typography color="#B0B3B8">
                   {user.role === 'ADMIN' ? 'Администратор' : 'Пользователь'}
                 </Typography>
                 <Chip
                   label={`Участник с 2024`}
                   size="small"
-                  sx={{ mt: 1 }}
+                  sx={{ mt: 1, background: 'rgba(255, 255, 255, 0.1)', color: '#B0B3B8' }}
                 />
               </Box>
             </Box>
 
-            <Divider sx={{ my: 2 }} />
+            <Divider sx={{ my: 2, borderColor: 'rgba(255, 255, 255, 0.1)' }} />
 
-            {isEditing ? (
-              <Box>
-                <TextField
-                  fullWidth
-                  label="Имя пользователя"
-                  value={editData.username}
-                  onChange={(e) => setEditData({...editData, username: e.target.value})}
-                  margin="normal"
-                />
-                <TextField
-                  fullWidth
-                  label="Email"
-                  type="email"
-                  value={editData.email}
-                  onChange={(e) => setEditData({...editData, email: e.target.value})}
-                  margin="normal"
-                />
-                <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
-                  <Button
-                    variant="contained"
-                    onClick={handleSave}
-                    fullWidth
-                  >
-                    Сохранить
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={handleCancel}
-                    fullWidth
-                  >
-                    Отмена
-                  </Button>
-                </Box>
-              </Box>
-            ) : (
-              <Box>
-                <Typography variant="h6" gutterBottom>Информация</Typography>
-                <Typography paragraph><strong>Email:</strong> {user.email}</Typography>
-                <Typography paragraph><strong>Роль:</strong> {user.role === 'ADMIN' ? 'Администратор' : 'Пользователь'}</Typography>
+            <Box>
+              <Typography variant="h6" gutterBottom sx={{ color: '#fff' }}>
+                Информация
+              </Typography>
+              <Typography paragraph sx={{ color: '#B0B3B8' }}>
+                <strong>Email:</strong> {user.email}
+              </Typography>
+              <Typography paragraph sx={{ color: '#B0B3B8' }}>
+                <strong>Роль:</strong> {user.role === 'ADMIN' ? 'Администратор' : 'Пользователь'}
+              </Typography>
 
-                <Box sx={{ mt: 3 }}>
-                  <Typography variant="subtitle2" color="textSecondary">Статистика</Typography>
-                  <Box sx={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    mt: 1,
-                  }}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h6">{bookings.length}</Typography>
-                      <Typography variant="caption">Бронирований</Typography>
-                    </Box>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h6">{totalSpent} ₽</Typography>
-                      <Typography variant="caption">Всего потрачено</Typography>
-                    </Box>
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle2" color="#B0B3B8">
+                  Статистика
+                </Typography>
+                <Box sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  mt: 1,
+                }}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" sx={{ color: '#fff' }}>
+                      {bookings.length}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#B0B3B8' }}>
+                      Всего билетов
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" sx={{ color: '#fff' }}>
+                      {totalSpent} ₽
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#B0B3B8' }}>
+                      Всего потрачено
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" sx={{ color: '#fff' }}>
+                      {cancelledBookings.length}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#B0B3B8' }}>
+                      Отменено
+                    </Typography>
                   </Box>
                 </Box>
-
-                <Button
-                  variant="contained"
-                  startIcon={<Edit />}
-                  onClick={() => setIsEditing(true)}
-                  fullWidth
-                  sx={{ mt: 3 }}
-                >
-                  Редактировать профиль
-                </Button>
               </Box>
-            )}
-          </Paper>
-
-          <Paper elevation={3} sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>Любимые жанры</Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 2 }}>
-              {['Фантастика', 'Драма', 'Триллер', 'Комедия'].map((genre, index) => (
-                <Chip key={index} label={genre} color="primary" variant="outlined" />
-              ))}
             </Box>
           </Paper>
         </Box>
 
+        {/* Правая колонка - табы с бронированиями */}
         <Box sx={{
           width: { xs: '100%', md: '65%' },
           flex: 1,
         }}>
-          <Paper elevation={3} sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Paper elevation={3} sx={{ p: 3, background: '#1F2128' }}>
+            <Box sx={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              mb: 2
+            }}>
               <Tabs value={tabValue} onChange={handleTabChange}>
-                <Tab icon={<History />} label="История бронирований" />
-                <Tab icon={<ConfirmationNumber />} label="Активные билеты" />
-                <Tab icon={<Settings />} label="Настройки профиля" />
+                <Tab
+                  icon={<History />}
+                  label="История бронирований"
+                  sx={{ color: '#B0B3B8' }}
+                />
+                <Tab
+                  icon={<ConfirmationNumber />}
+                  label="Активные билеты"
+                  sx={{ color: '#B0B3B8' }}
+                />
+                <Tab
+                  icon={<Cancel />}
+                  label="Отмененные"
+                  sx={{ color: '#B0B3B8' }}
+                />
               </Tabs>
+
               <Button
                 variant="outlined"
                 size="small"
                 onClick={handleRefreshBookings}
                 disabled={loading}
+                startIcon={<Refresh />}
+                sx={{
+                  color: '#FF3A44',
+                  borderColor: '#FF3A44',
+                  '&:hover': {
+                    borderColor: '#FF6B73',
+                    background: 'rgba(255, 58, 68, 0.1)',
+                  },
+                }}
               >
                 Обновить
               </Button>
             </Box>
 
+            {/* Таб 1: Все бронирования */}
             <TabPanel value={tabValue} index={0}>
-              <Typography variant="h6" gutterBottom>
+              <Typography variant="h6" gutterBottom sx={{ color: '#fff' }}>
                 История бронирований
               </Typography>
 
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                  <CircularProgress />
+                  <CircularProgress sx={{ color: '#FF3A44' }} />
                 </Box>
               ) : bookings.length === 0 ? (
-                <Alert severity="info" sx={{ mb: 2 }}>
+                <Alert
+                  severity="info"
+                  sx={{
+                    mb: 2,
+                    background: 'rgba(33, 150, 243, 0.1)',
+                    border: '1px solid rgba(33, 150, 243, 0.3)',
+                    color: '#64B5F6',
+                  }}
+                >
                   У вас пока нет бронирований
                   <Button
                     variant="outlined"
@@ -441,7 +426,13 @@ const Profile: React.FC = () => {
               ) : (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {bookings.map((booking) => (
-                    <Card key={booking.id}>
+                    <Card
+                      key={booking.id}
+                      sx={{
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                      }}
+                    >
                       <CardContent>
                         <Box sx={{
                           display: 'flex',
@@ -450,44 +441,64 @@ const Profile: React.FC = () => {
                           alignItems: { xs: 'flex-start', md: 'center' },
                         }}>
                           <Box sx={{ flex: 1 }}>
-                            <Typography variant="h6">{booking.movieTitle}</Typography>
-                            <Typography color="textSecondary" sx={{ mt: 1 }}>
+                            <Typography variant="h6" sx={{ color: '#fff' }}>
+                              {booking.movieTitle}
+                            </Typography>
+                            <Typography color="#B0B3B8" sx={{ mt: 1 }}>
                               <CalendarToday sx={{ fontSize: 14, verticalAlign: 'middle', mr: 0.5 }} />
                               {booking.date} •
                               <AccessTime sx={{ fontSize: 14, verticalAlign: 'middle', mx: 0.5 }} />
                               {booking.time}
                             </Typography>
-                            <Typography variant="body2" sx={{ mt: 1 }}>
+                            <Typography variant="body2" sx={{ mt: 1, color: '#B0B3B8' }}>
                               <LocationOn sx={{ fontSize: 14, verticalAlign: 'middle', mr: 0.5 }} />
                               {booking.cinema} • {booking.hall}
                             </Typography>
-                            <Typography variant="body2" sx={{ mt: 1 }}>
+                            <Typography variant="body2" sx={{ mt: 1, color: '#B0B3B8' }}>
                               Места: {booking.seats.join(', ')}
                             </Typography>
                           </Box>
+
                           <Box sx={{
                             textAlign: { xs: 'left', md: 'right' },
                             mt: { xs: 2, md: 0 },
                           }}>
                             <Chip
                               label={booking.status === 'active' ? 'Активен' :
-                                     booking.status === 'completed' ? 'Завершен' : 'Отменен'}
+                                     booking.status === 'completed' ? 'Завершен' :
+                                     booking.status === 'cancelled' ? 'Отменен' : 'В обработке'}
                               color={booking.status === 'active' ? 'success' :
-                                     booking.status === 'completed' ? 'default' : 'error'}
+                                     booking.status === 'completed' ? 'default' :
+                                     booking.status === 'cancelled' ? 'error' : 'warning'}
                               size="small"
+                              sx={{ mb: 1 }}
                             />
-                            <Typography variant="h6" sx={{ mt: 1 }}>
+
+                            <Typography variant="h6" sx={{ mt: 1, color: '#fff' }}>
                               {booking.price} ₽
                             </Typography>
+
                             {booking.status === 'active' && (
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                sx={{ mt: 1 }}
-                                onClick={() => navigate(`/booking/${booking.sessionId}`)}
-                              >
-                                Подробнее
-                              </Button>
+                              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{
+                                    color: '#FF3A44',
+                                    borderColor: '#FF3A44',
+                                  }}
+                                  onClick={() => handleCancelClick(booking)}
+                                >
+                                  Отменить
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={() => navigate(`/booking/${booking.sessionId}`)}
+                                >
+                                  Подробнее
+                                </Button>
+                              </Box>
                             )}
                           </Box>
                         </Box>
@@ -498,17 +509,26 @@ const Profile: React.FC = () => {
               )}
             </TabPanel>
 
+            {/* Таб 2: Активные билеты */}
             <TabPanel value={tabValue} index={1}>
-              <Typography variant="h6" gutterBottom>
+              <Typography variant="h6" gutterBottom sx={{ color: '#fff' }}>
                 Активные билеты
               </Typography>
 
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                  <CircularProgress />
+                  <CircularProgress sx={{ color: '#FF3A44' }} />
                 </Box>
               ) : activeBookings.length === 0 ? (
-                <Alert severity="info" sx={{ mb: 3 }}>
+                <Alert
+                  severity="info"
+                  sx={{
+                    mb: 3,
+                    background: 'rgba(33, 150, 243, 0.1)',
+                    border: '1px solid rgba(33, 150, 243, 0.3)',
+                    color: '#64B5F6',
+                  }}
+                >
                   У вас нет активных билетов
                   <Button
                     variant="outlined"
@@ -522,53 +542,62 @@ const Profile: React.FC = () => {
               ) : (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {activeBookings.map((booking) => (
-                    <Card key={booking.id}>
+                    <Card
+                      key={booking.id}
+                      sx={{
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                      }}
+                    >
                       <CardContent>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Box>
-                            <Typography variant="h6">{booking.movieTitle}</Typography>
-                            <Typography color="textSecondary" sx={{ mt: 1 }}>
+                            <Typography variant="h6" sx={{ color: '#fff' }}>
+                              {booking.movieTitle}
+                            </Typography>
+                            <Typography color="#B0B3B8" sx={{ mt: 1 }}>
                               {booking.date} • {booking.time}
                             </Typography>
-                            <Typography variant="body2" sx={{ mt: 1 }}>
+                            <Typography variant="body2" sx={{ mt: 1, color: '#B0B3B8' }}>
                               Места: {booking.seats.join(', ')}
                             </Typography>
                           </Box>
+
                           <Box sx={{ textAlign: 'right' }}>
-                            <Chip label="Активен" color="success" size="small" />
-                            <Typography variant="h6" sx={{ mt: 1 }}>
+                            <Chip
+                              label="Активен"
+                              color="success"
+                              size="small"
+                              sx={{ mb: 1 }}
+                            />
+
+                            <Typography variant="h6" sx={{ mt: 1, color: '#fff' }}>
                               {booking.price} ₽
                             </Typography>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              sx={{ mt: 1 }}
-                              onClick={() => navigate(`/booking/${booking.sessionId}`)}
-                            >
-                              Подробнее
-                            </Button>
-                          </Box>
-                        </Box>
 
-                        <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
-                          <Typography variant="subtitle2" gutterBottom>
-                            QR-код для входа:
-                          </Typography>
-                          <Box
-                            sx={{
-                              width: 120,
-                              height: 120,
-                              bgcolor: 'grey.200',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              mx: 'auto',
-                              borderRadius: 1,
-                            }}
-                          >
-                            <Typography variant="caption" color="textSecondary" align="center">
-                              QR-код<br />билета #{booking.id}
-                            </Typography>
+                            <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                              <Button
+                                size="small"
+                                variant="contained"
+                                color="error"
+                                onClick={() => handleCancelClick(booking)}
+                                sx={{
+                                  background: 'linear-gradient(135deg, #FF5252 0%, #FF8A80 100%)',
+                                  '&:hover': {
+                                    background: 'linear-gradient(135deg, #FF8A80 0%, #FF5252 100%)',
+                                  },
+                                }}
+                              >
+                                Отменить
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => navigate(`/booking/${booking.sessionId}`)}
+                              >
+                                Подробнее
+                              </Button>
+                            </Box>
                           </Box>
                         </Box>
                       </CardContent>
@@ -586,113 +615,81 @@ const Profile: React.FC = () => {
               </Button>
             </TabPanel>
 
+            {/* Таб 3: Отмененные билеты */}
             <TabPanel value={tabValue} index={2}>
-              <Typography variant="h6" gutterBottom>
-                Настройки профиля
+              <Typography variant="h6" gutterBottom sx={{ color: '#fff' }}>
+                Отмененные бронирования
               </Typography>
 
-              <Paper sx={{ p: 3, mb: 3 }}>
-                <Typography variant="subtitle1" gutterBottom>
-                  Личная информация
-                </Typography>
-
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <TextField
-                    label="Имя пользователя"
-                    value={editData.username}
-                    onChange={(e) => setEditData({...editData, username: e.target.value})}
-                    fullWidth
-                  />
-
-                  <TextField
-                    label="Email"
-                    type="email"
-                    value={editData.email}
-                    onChange={(e) => setEditData({...editData, email: e.target.value})}
-                    fullWidth
-                  />
-
-                  <Button
-                    variant="contained"
-                    onClick={handleSave}
-                    sx={{ alignSelf: 'flex-start' }}
-                  >
-                    Сохранить изменения
-                  </Button>
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                  <CircularProgress sx={{ color: '#FF3A44' }} />
                 </Box>
-              </Paper>
-
-              <Paper sx={{ p: 3, mb: 3 }}>
-                <Typography variant="subtitle1" gutterBottom>
-                  Смена пароля
-                </Typography>
-
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <TextField
-                    label="Текущий пароль"
-                    type="password"
-                    value={passwordData.currentPassword}
-                    onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
-                    fullWidth
-                  />
-
-                  <TextField
-                    label="Новый пароль"
-                    type="password"
-                    value={passwordData.newPassword}
-                    onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
-                    fullWidth
-                  />
-
-                  <TextField
-                    label="Подтвердите новый пароль"
-                    type="password"
-                    value={passwordData.confirmPassword}
-                    onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}
-                    fullWidth
-                  />
-
-                  <Button
-                    variant="outlined"
-                    onClick={handleChangePassword}
-                    sx={{ alignSelf: 'flex-start' }}
-                  >
-                    Сменить пароль
-                  </Button>
-                </Box>
-              </Paper>
-
-              <Paper sx={{ p: 3 }}>
-                <Typography variant="subtitle1" gutterBottom color="error">
-                  Опасная зона
-                </Typography>
-
-                <Button
-                  variant="outlined"
-                  color="error"
-                  onClick={handleLogout}
-                  sx={{ mr: 2 }}
-                >
-                  Выйти из аккаунта
-                </Button>
-
-                <Button
-                  variant="contained"
-                  color="error"
-                  onClick={() => {
-                    if (window.confirm('Вы уверены, что хотите удалить аккаунт? Это действие нельзя отменить.')) {
-                      alert('Функция удаления аккаунта будет реализована позже');
-                    }
+              ) : cancelledBookings.length === 0 ? (
+                <Alert
+                  severity="info"
+                  sx={{
+                    background: 'rgba(33, 150, 243, 0.1)',
+                    border: '1px solid rgba(33, 150, 243, 0.3)',
+                    color: '#64B5F6',
                   }}
                 >
-                  Удалить аккаунт
-                </Button>
-              </Paper>
+                  У вас нет отмененных бронирований
+                </Alert>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {cancelledBookings.map((booking) => (
+                    <Card
+                      key={booking.id}
+                      sx={{
+                        background: 'rgba(244, 67, 54, 0.05)',
+                        border: '1px solid rgba(244, 67, 54, 0.2)',
+                      }}
+                    >
+                      <CardContent>
+                        <Typography variant="h6" sx={{ color: '#fff' }}>
+                          {booking.movieTitle}
+                        </Typography>
+
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                          <Chip
+                            label="Отменен"
+                            color="error"
+                            size="small"
+                          />
+                          <Typography variant="caption" sx={{ color: '#FF6B73' }}>
+                            Деньги будут возвращены в течение 3-5 рабочих дней
+                          </Typography>
+                        </Box>
+
+                        <Typography color="#B0B3B8" sx={{ mt: 1 }}>
+                          Дата отмены: {booking.date} • {booking.time}
+                        </Typography>
+
+                        <Typography variant="body2" sx={{ mt: 1, color: '#B0B3B8' }}>
+                          Возвращаемая сумма: {booking.price} ₽
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </Box>
+              )}
             </TabPanel>
           </Paper>
         </Box>
       </Box>
 
+      {/* Диалог отмены бронирования */}
+      {selectedBooking && (
+        <CancelBookingDialog
+          open={cancelDialogOpen}
+          onClose={() => setCancelDialogOpen(false)}
+          onSuccess={handleCancelSuccess}
+          booking={selectedBooking}
+        />
+      )}
+
+      {/* Уведомления */}
       <Snackbar
         open={snackbar.open}
         autoHideDuration={3000}
@@ -710,8 +707,8 @@ const Profile: React.FC = () => {
         }
         sx={{
           '& .MuiSnackbarContent-root': {
-            backgroundColor: snackbar.type === 'success' ? '#4caf50' : '#f44336',
-          }
+            background: snackbar.type === 'success' ? '#4caf50' : '#f44336',
+          },
         }}
       />
     </Container>

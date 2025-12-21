@@ -16,12 +16,9 @@ import AdminUsers from './pages/AdminUsers';
 import AdminCinemas from './pages/AdminCinemas';
 import AdminHalls from './pages/AdminHalls';
 
-const theme = createTheme({
-  palette: {
-    primary: { main: '#1976d2' },
-    secondary: { main: '#dc004e' },
-  },
-});
+import { cinemaTheme } from './theme';
+
+const theme = createTheme(cinemaTheme);
 
 function App() {
   return (

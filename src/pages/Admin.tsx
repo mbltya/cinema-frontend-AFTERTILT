@@ -283,27 +283,32 @@ const Admin: React.FC = () => {
           >
             Добавить фильм
           </Button>
-          <Button variant="outlined"
-            component = {RouterLink}
-            to = "/admin/sessions">
+          <Button
+            variant="outlined"
+            component={RouterLink}
+            to="/admin/sessions"
+          >
             Управление сеансами
           </Button>
-          <Button variant="outlined">
-            Просмотреть отчеты
-          </Button>
-          <Button variant="outlined"
+          <Button
+            variant="outlined"
             component={RouterLink}
-            to="/admin/users">
+            to="/admin/users"
+          >
             Управление пользователями
           </Button>
-          <Button variant="outlined"
+          <Button
+            variant="outlined"
             component={RouterLink}
-            to ="/admin/cinemas">
+            to="/admin/cinemas"
+          >
             Управление кинотеатрами
           </Button>
-          <Button variant="outlined"
+          <Button
+            variant="outlined"
             component={RouterLink}
-            to="/admin/halls">
+            to="/admin/halls"
+          >
             Управление залами
           </Button>
         </Box>
