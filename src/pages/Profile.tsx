@@ -16,22 +16,15 @@ import {
   CircularProgress,
   Snackbar,
   IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material';
 import {
-  Edit,
   History,
   ConfirmationNumber,
   CalendarToday,
   LocationOn,
   AccessTime,
-  Settings,
-  Close,
-  Cancel,
   Refresh,
+  Close,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -45,11 +38,12 @@ interface Booking {
   time: string;
   seats: string[];
   price: number;
-  status: 'active' | 'completed' | 'cancelled' | 'pending';
+  status: 'active' | 'cancelled' | 'expired';
   cinema: string;
   hall: string;
   sessionId: number;
   ticketId?: number;
+  sessionTime?: string;
 }
 
 interface TabPanelProps {
@@ -81,6 +75,34 @@ const Profile: React.FC = () => {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
 
+  // Функция для проверки, прошел ли сеанс
+  const isSessionPassed = (sessionTime: string): boolean => {
+    try {
+      const sessionDate = new Date(sessionTime);
+      const now = new Date();
+      return sessionDate < now;
+    } catch {
+      return false;
+    }
+  };
+
+  // Функция для определения статуса билета (только 3 статуса)
+  const determineTicketStatus = (ticket: any): Booking['status'] => {
+    // Если билет отменен
+    if (ticket.status === 'CANCELLED') {
+      return 'cancelled';
+    }
+
+    // Проверяем, прошел ли сеанс
+    const sessionTime = ticket.sessionTime || ticket.purchaseTime;
+    if (sessionTime && isSessionPassed(sessionTime)) {
+      return 'expired';
+    }
+
+    // Если не отменен и сеанс не прошел - активен
+    return 'active';
+  };
+
   const fetchBookings = useCallback(async () => {
     if (!user) return;
 
@@ -104,24 +126,33 @@ const Profile: React.FC = () => {
 
       const bookingsData: Booking[] = response.data.map((ticket: any) => {
         const sessionTime = ticket.sessionTime || ticket.purchaseTime;
+        const status = determineTicketStatus(ticket);
+
         return {
           id: ticket.id,
           ticketId: ticket.id,
           movieTitle: ticket.movieTitle || 'Неизвестный фильм',
-          date: new Date(sessionTime).toLocaleDateString('ru-RU'),
-          time: new Date(sessionTime).toLocaleTimeString('ru-RU', {
+          date: sessionTime ? new Date(sessionTime).toLocaleDateString('ru-RU') : 'Дата не указана',
+          time: sessionTime ? new Date(sessionTime).toLocaleTimeString('ru-RU', {
             hour: '2-digit',
             minute: '2-digit',
-          }),
+          }) : 'Время не указано',
           seats: ticket.rowNumber && ticket.seatNumber
             ? [`Ряд ${ticket.rowNumber}, Место ${ticket.seatNumber}`]
             : ['Место не указано'],
           price: ticket.price || 0,
-          status: mapTicketStatus(ticket.status),
+          status: status,
           cinema: ticket.cinemaName || 'Кинотеатр',
           hall: ticket.hallName || 'Зал',
           sessionId: ticket.sessionId || 0,
+          sessionTime: sessionTime,
         };
+      });
+
+      // Сортируем по дате сеанса (новые сверху)
+      bookingsData.sort((a, b) => {
+        if (!a.sessionTime || !b.sessionTime) return 0;
+        return new Date(b.sessionTime).getTime() - new Date(a.sessionTime).getTime();
       });
 
       setBookings(bookingsData);
@@ -133,7 +164,7 @@ const Profile: React.FC = () => {
         type: 'error'
       });
 
-      // Fallback данные для демонстрации
+      // Fallback данные для демонстрации с 3 статусами
       const mockBookings: Booking[] = [
         {
           id: 1,
@@ -142,22 +173,37 @@ const Profile: React.FC = () => {
           time: '19:30',
           seats: ['Ряд 5, Место 10', 'Ряд 5, Место 11'],
           price: 2500,
-          status: 'active',
+          status: 'active', // Активен - сеанс еще не прошел
           cinema: 'Кинотеатр "Октябрь"',
           hall: 'Зал 1',
           sessionId: 1,
+          sessionTime: '2024-12-15T19:30:00',
         },
         {
           id: 2,
           movieTitle: 'Дюна: Часть вторая',
-          date: '16.12.2024',
+          date: '01.10.2024',
           time: '20:00',
           seats: ['Ряд 7, Место 8'],
           price: 1500,
-          status: 'active',
+          status: 'expired', // Не активен - сеанс прошел
           cinema: 'Кинотеатр "Октябрь"',
           hall: 'Зал 3',
           sessionId: 2,
+          sessionTime: '2024-10-01T20:00:00',
+        },
+        {
+          id: 3,
+          movieTitle: 'Мстители: Финал',
+          date: '20.12.2024',
+          time: '18:00',
+          seats: ['Ряд 4, Место 12'],
+          price: 1800,
+          status: 'cancelled', // Отменен
+          cinema: 'Кинотеатр "Октябрь"',
+          hall: 'Зал 2',
+          sessionId: 3,
+          sessionTime: '2024-12-20T18:00:00',
         },
       ];
       setBookings(mockBookings);
@@ -170,29 +216,8 @@ const Profile: React.FC = () => {
     fetchBookings();
   }, [fetchBookings]);
 
-  const mapTicketStatus = (status: string): Booking['status'] => {
-    if (!status) return 'active';
-
-    switch (status.toUpperCase()) {
-      case 'PENDING':
-      case 'CONFIRMED':
-        return 'active';
-      case 'USED':
-        return 'completed';
-      case 'CANCELLED':
-        return 'cancelled';
-      default:
-        return 'active';
-    }
-  };
-
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
-  };
-
-  const handleLogout = () => {
-    logout();
-    navigate('/');
   };
 
   const handleCloseSnackbar = () => {
@@ -209,13 +234,22 @@ const Profile: React.FC = () => {
   };
 
   const handleCancelClick = (booking: Booking) => {
+    // Проверяем, можно ли отменить этот билет
+    if (booking.status !== 'active') {
+      setSnackbar({
+        open: true,
+        message: 'Этот билет нельзя отменить',
+        type: 'error'
+      });
+      return;
+    }
     setSelectedBooking(booking);
     setCancelDialogOpen(true);
   };
 
   const handleCancelSuccess = () => {
     fetchBookings();
-    refreshUser(); // Обновляем данные пользователя
+    refreshUser();
     setSnackbar({
       open: true,
       message: 'Бронирование успешно отменено',
@@ -223,10 +257,17 @@ const Profile: React.FC = () => {
     });
   };
 
+  // Фильтрация для разных табов
   const activeBookings = bookings.filter(b => b.status === 'active');
   const cancelledBookings = bookings.filter(b => b.status === 'cancelled');
+  const expiredBookings = bookings.filter(b => b.status === 'expired');
+
+  // Для первого таба показываем все билеты
+  const allBookings = bookings;
+
+  // Общая статистика
   const totalSpent = bookings
-    .filter(b => b.status !== 'cancelled')
+    .filter(b => b.status === 'active')
     .reduce((sum, booking) => sum + booking.price, 0);
 
   if (!user) {
@@ -245,6 +286,31 @@ const Profile: React.FC = () => {
       </Container>
     );
   }
+
+  // Функция для получения цвета статуса
+  const getStatusColor = (status: Booking['status']) => {
+    switch (status) {
+      case 'active': return 'success';
+      case 'cancelled': return 'error';
+      case 'expired': return 'warning';
+      default: return 'default';
+    }
+  };
+
+  // Функция для получения текста статуса
+  const getStatusText = (status: Booking['status']) => {
+    switch (status) {
+      case 'active': return 'Активен';
+      case 'cancelled': return 'Отменен';
+      case 'expired': return 'Прошел';
+      default: return 'Неизвестно';
+    }
+  };
+
+  // Функция для проверки, можно ли отменить билет
+  const canCancelBooking = (booking: Booking) => {
+    return booking.status === 'active' && booking.sessionTime && !isSessionPassed(booking.sessionTime);
+  };
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -284,11 +350,6 @@ const Profile: React.FC = () => {
                 <Typography color="#B0B3B8">
                   {user.role === 'ADMIN' ? 'Администратор' : 'Пользователь'}
                 </Typography>
-                <Chip
-                  label={`Участник с 2024`}
-                  size="small"
-                  sx={{ mt: 1, background: 'rgba(255, 255, 255, 0.1)', color: '#B0B3B8' }}
-                />
               </Box>
             </Box>
 
@@ -324,18 +385,10 @@ const Profile: React.FC = () => {
                   </Box>
                   <Box sx={{ textAlign: 'center' }}>
                     <Typography variant="h6" sx={{ color: '#fff' }}>
-                      {totalSpent} ₽
+                      {activeBookings.length}
                     </Typography>
                     <Typography variant="caption" sx={{ color: '#B0B3B8' }}>
-                      Всего потрачено
-                    </Typography>
-                  </Box>
-                  <Box sx={{ textAlign: 'center' }}>
-                    <Typography variant="h6" sx={{ color: '#fff' }}>
-                      {cancelledBookings.length}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: '#B0B3B8' }}>
-                      Отменено
+                      Активных
                     </Typography>
                   </Box>
                 </Box>
@@ -359,17 +412,12 @@ const Profile: React.FC = () => {
               <Tabs value={tabValue} onChange={handleTabChange}>
                 <Tab
                   icon={<History />}
-                  label="История бронирований"
+                  label="Все билеты"
                   sx={{ color: '#B0B3B8' }}
                 />
                 <Tab
                   icon={<ConfirmationNumber />}
-                  label="Активные билеты"
-                  sx={{ color: '#B0B3B8' }}
-                />
-                <Tab
-                  icon={<Cancel />}
-                  label="Отмененные"
+                  label="Активные"
                   sx={{ color: '#B0B3B8' }}
                 />
               </Tabs>
@@ -393,17 +441,17 @@ const Profile: React.FC = () => {
               </Button>
             </Box>
 
-            {/* Таб 1: Все бронирования */}
+            {/* Таб 1: Все билеты */}
             <TabPanel value={tabValue} index={0}>
               <Typography variant="h6" gutterBottom sx={{ color: '#fff' }}>
-                История бронирований
+                Все билеты
               </Typography>
 
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
                   <CircularProgress sx={{ color: '#FF3A44' }} />
                 </Box>
-              ) : bookings.length === 0 ? (
+              ) : allBookings.length === 0 ? (
                 <Alert
                   severity="info"
                   sx={{
@@ -413,7 +461,7 @@ const Profile: React.FC = () => {
                     color: '#64B5F6',
                   }}
                 >
-                  У вас пока нет бронирований
+                  У вас пока нет билетов
                   <Button
                     variant="outlined"
                     size="small"
@@ -425,12 +473,20 @@ const Profile: React.FC = () => {
                 </Alert>
               ) : (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {bookings.map((booking) => (
+                  {allBookings.map((booking) => (
                     <Card
                       key={booking.id}
                       sx={{
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        background: booking.status === 'cancelled'
+                          ? 'rgba(244, 67, 54, 0.05)'
+                          : booking.status === 'expired'
+                          ? 'rgba(255, 152, 0, 0.05)'
+                          : 'rgba(255, 255, 255, 0.05)',
+                        border: booking.status === 'cancelled'
+                          ? '1px solid rgba(244, 67, 54, 0.2)'
+                          : booking.status === 'expired'
+                          ? '1px solid rgba(255, 152, 0, 0.2)'
+                          : '1px solid rgba(255, 255, 255, 0.1)',
                       }}
                     >
                       <CardContent>
@@ -464,12 +520,8 @@ const Profile: React.FC = () => {
                             mt: { xs: 2, md: 0 },
                           }}>
                             <Chip
-                              label={booking.status === 'active' ? 'Активен' :
-                                     booking.status === 'completed' ? 'Завершен' :
-                                     booking.status === 'cancelled' ? 'Отменен' : 'В обработке'}
-                              color={booking.status === 'active' ? 'success' :
-                                     booking.status === 'completed' ? 'default' :
-                                     booking.status === 'cancelled' ? 'error' : 'warning'}
+                              label={getStatusText(booking.status)}
+                              color={getStatusColor(booking.status)}
                               size="small"
                               sx={{ mb: 1 }}
                             />
@@ -478,27 +530,31 @@ const Profile: React.FC = () => {
                               {booking.price} ₽
                             </Typography>
 
-                            {booking.status === 'active' && (
-                              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{
-                                    color: '#FF3A44',
-                                    borderColor: '#FF3A44',
-                                  }}
-                                  onClick={() => handleCancelClick(booking)}
-                                >
-                                  Отменить
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={() => navigate(`/booking/${booking.sessionId}`)}
-                                >
-                                  Подробнее
-                                </Button>
-                              </Box>
+                            {booking.status === 'cancelled' && (
+                              <Typography variant="caption" sx={{ color: '#FF6B73', display: 'block', mt: 1 }}>
+                                Отменено
+                              </Typography>
+                            )}
+
+                            {booking.status === 'expired' && (
+                              <Typography variant="caption" sx={{ color: '#FFB74D', display: 'block', mt: 1 }}>
+                                Сеанс прошел
+                              </Typography>
+                            )}
+
+                            {booking.status === 'active' && canCancelBooking(booking) && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                sx={{
+                                  mt: 1,
+                                  color: '#FF3A44',
+                                  borderColor: '#FF3A44',
+                                }}
+                                onClick={() => handleCancelClick(booking)}
+                              >
+                                Отменить
+                              </Button>
                             )}
                           </Box>
                         </Box>
@@ -575,13 +631,14 @@ const Profile: React.FC = () => {
                               {booking.price} ₽
                             </Typography>
 
-                            <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                            {canCancelBooking(booking) && (
                               <Button
                                 size="small"
                                 variant="contained"
                                 color="error"
                                 onClick={() => handleCancelClick(booking)}
                                 sx={{
+                                  mt: 1,
                                   background: 'linear-gradient(135deg, #FF5252 0%, #FF8A80 100%)',
                                   '&:hover': {
                                     background: 'linear-gradient(135deg, #FF8A80 0%, #FF5252 100%)',
@@ -590,14 +647,7 @@ const Profile: React.FC = () => {
                               >
                                 Отменить
                               </Button>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => navigate(`/booking/${booking.sessionId}`)}
-                              >
-                                Подробнее
-                              </Button>
-                            </Box>
+                            )}
                           </Box>
                         </Box>
                       </CardContent>
@@ -613,67 +663,6 @@ const Profile: React.FC = () => {
               >
                 Купить билеты
               </Button>
-            </TabPanel>
-
-            {/* Таб 3: Отмененные билеты */}
-            <TabPanel value={tabValue} index={2}>
-              <Typography variant="h6" gutterBottom sx={{ color: '#fff' }}>
-                Отмененные бронирования
-              </Typography>
-
-              {loading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                  <CircularProgress sx={{ color: '#FF3A44' }} />
-                </Box>
-              ) : cancelledBookings.length === 0 ? (
-                <Alert
-                  severity="info"
-                  sx={{
-                    background: 'rgba(33, 150, 243, 0.1)',
-                    border: '1px solid rgba(33, 150, 243, 0.3)',
-                    color: '#64B5F6',
-                  }}
-                >
-                  У вас нет отмененных бронирований
-                </Alert>
-              ) : (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {cancelledBookings.map((booking) => (
-                    <Card
-                      key={booking.id}
-                      sx={{
-                        background: 'rgba(244, 67, 54, 0.05)',
-                        border: '1px solid rgba(244, 67, 54, 0.2)',
-                      }}
-                    >
-                      <CardContent>
-                        <Typography variant="h6" sx={{ color: '#fff' }}>
-                          {booking.movieTitle}
-                        </Typography>
-
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                          <Chip
-                            label="Отменен"
-                            color="error"
-                            size="small"
-                          />
-                          <Typography variant="caption" sx={{ color: '#FF6B73' }}>
-                            Деньги будут возвращены в течение 3-5 рабочих дней
-                          </Typography>
-                        </Box>
-
-                        <Typography color="#B0B3B8" sx={{ mt: 1 }}>
-                          Дата отмены: {booking.date} • {booking.time}
-                        </Typography>
-
-                        <Typography variant="body2" sx={{ mt: 1, color: '#B0B3B8' }}>
-                          Возвращаемая сумма: {booking.price} ₽
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </Box>
-              )}
             </TabPanel>
           </Paper>
         </Box>

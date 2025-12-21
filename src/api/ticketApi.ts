@@ -3,7 +3,6 @@ import axios from 'axios';
 const API_URL = 'http://localhost:8080/api';
 
 export const ticketApi = {
-  // Упрощенная отмена бронирования
   cancelTicket: async (ticketId: number) => {
     const token = localStorage.getItem('cinema_token');
 
@@ -12,7 +11,6 @@ export const ticketApi = {
     }
 
     try {
-      // Пытаемся отменить напрямую
       const response = await axios.delete(`${API_URL}/tickets/${ticketId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -26,7 +24,6 @@ export const ticketApi = {
       };
 
     } catch (error: any) {
-      // Если эндпоинт DELETE не работает, пробуем PUT
       if (error.response?.status === 405) {
         try {
           const putResponse = await axios.put(
@@ -46,7 +43,6 @@ export const ticketApi = {
           };
 
         } catch (putError: any) {
-          // Если и PUT не работает, используем симуляцию
           if (putError.response?.status === 404 || putError.response?.status === 403) {
             console.log('Используем симуляцию отмены');
             return simulateCancellation(ticketId);
@@ -55,12 +51,10 @@ export const ticketApi = {
         }
       }
 
-      // Для 403 - пользователь пытается отменить не свой билет
       if (error.response?.status === 403) {
         throw new Error('Вы не можете отменить этот билет. Возможно, он принадлежит другому пользователю.');
       }
 
-      // Для 404 - эндпоинт не найден, используем симуляцию
       if (error.response?.status === 404) {
         console.log('Эндпоинт не найден, используем симуляцию');
         return simulateCancellation(ticketId);
@@ -70,7 +64,6 @@ export const ticketApi = {
     }
   },
 
-  // Получение билетов пользователя
   getUserTickets: async (userId: number) => {
     const token = localStorage.getItem('cinema_token');
     const response = await axios.get(`${API_URL}/tickets/user/${userId}`, {
@@ -82,11 +75,9 @@ export const ticketApi = {
   },
 };
 
-// Функция симуляции отмены
 const simulateCancellation = (ticketId: number) => {
   console.log(`Симуляция отмены билета ${ticketId}`);
 
-  // Сохраняем в localStorage для демонстрации
   const cancelledTickets = JSON.parse(
     localStorage.getItem('simulated_cancelled_tickets') || '[]'
   );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Container,
   Typography,
@@ -60,7 +60,6 @@ const AdminSessions: React.FC = () => {
     price: '',
     format: '2D',
   });
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     if (!user || user.role !== 'ADMIN') {
@@ -82,7 +81,7 @@ const AdminSessions: React.FC = () => {
         axios.get('http://localhost:8080/api/halls'),
       ]);
 
-      // Сортируем фильмы по ID
+      // Сортируем фильмы по ID (или по названию, в зависимости от того, что вам нужно)
       const sortedMovies = [...moviesRes.data].sort((a, b) => a.id - b.id);
 
       setSessions(sessionsRes.data);
@@ -96,6 +95,10 @@ const AdminSessions: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const sortedSessions = useMemo(() => {
+    return [...sessions].sort((a, b) => a.id - b.id);
+  }, [sessions]);
 
   const handleCreateSession = async () => {
     if (!formData.movieId || !formData.hallId || !formData.startTime || !formData.price) {
@@ -151,21 +154,6 @@ const AdminSessions: React.FC = () => {
     });
   };
 
-  // Сортировка сеансов по ID фильма
-  const getSortedSessions = () => {
-    return [...sessions].sort((a, b) => {
-      if (sortOrder === 'asc') {
-        return a.movieId - b.movieId;
-      } else {
-        return b.movieId - a.movieId;
-      }
-    });
-  };
-
-  const toggleSortOrder = () => {
-    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-  };
-
   if (!user || user.role !== 'ADMIN') {
     return (
       <Container>
@@ -183,8 +171,6 @@ const AdminSessions: React.FC = () => {
       </Container>
     );
   }
-
-  const sortedSessions = getSortedSessions();
 
   return (
     <Container maxWidth="lg">
@@ -313,21 +299,9 @@ const AdminSessions: React.FC = () => {
 
       {/* Список сеансов */}
       <Paper sx={{ p: 3, background: '#1F2128', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h6" sx={{ color: '#fff' }}>
-            Список сеансов
-          </Typography>
-          <Button
-            variant="outlined"
-            onClick={toggleSortOrder}
-            sx={{
-              color: '#FF3A44',
-              borderColor: '#FF3A44',
-            }}
-          >
-            Сортировать по ID фильма ({sortOrder === 'asc' ? '↑' : '↓'})
-          </Button>
-        </Box>
+        <Typography variant="h6" sx={{ color: '#fff', mb: 3 }}>
+          Список сеансов
+        </Typography>
 
         {sortedSessions.length === 0 ? (
           <Alert severity="info">Сеансы отсутствуют</Alert>

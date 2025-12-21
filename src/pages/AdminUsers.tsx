@@ -159,7 +159,6 @@ const AdminUsers: React.FC = () => {
                 role: formData.role
             };
 
-            // Добавляем пароль только если он указан (или при создании)
             if (formData.password || !editingUser) {
                 userData.password = formData.password;
             }
@@ -237,7 +236,6 @@ const AdminUsers: React.FC = () => {
             setSuccessMessage('Пользователь заблокирован');
             await fetchUsers();
         } catch (err: any) {
-            // Если эндпоинт не реализован, используем локальную блокировку
             if (err.response?.status === 404) {
                 handleLocalBlock(id, true);
             } else {
@@ -261,7 +259,6 @@ const AdminUsers: React.FC = () => {
             setSuccessMessage('Пользователь разблокирован');
             await fetchUsers();
         } catch (err: any) {
-            // Если эндпоинт не реализован, используем локальную блокировку
             if (err.response?.status === 404) {
                 handleLocalBlock(id, false);
             } else {
@@ -271,7 +268,6 @@ const AdminUsers: React.FC = () => {
         }
     };
 
-    // Локальная блокировка (если бэкенд не поддерживает)
     const handleLocalBlock = (id: number, block: boolean) => {
         setUsers(prevUsers =>
             prevUsers.map(u =>
@@ -436,17 +432,6 @@ const AdminUsers: React.FC = () => {
                                                         Заблокировать
                                                     </Button>
                                                 )}
-
-                                                <Button
-                                                    size="small"
-                                                    startIcon={<DeleteIcon />}
-                                                    variant="outlined"
-                                                    color="error"
-                                                    onClick={() => handleDeleteClick(userItem)}
-                                                    disabled={userItem.id === user?.id}
-                                                >
-                                                    Удалить
-                                                </Button>
                                             </Box>
                                         </TableCell>
                                     </TableRow>

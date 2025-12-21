@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import {
   Container,
@@ -41,10 +41,39 @@ interface Movie {
   trailerUrl?: string;
 }
 
+interface Session {
+  id: number;
+  movieTitle: string;
+  cinemaName: string;
+  hallName: string;
+  startTime: string;
+  price: number;
+  format: string;
+}
+
+interface Cinema {
+  id: number;
+  name: string;
+  city: string;
+  address: string;
+}
+
+interface Ticket {
+  id: number;
+  movieTitle: string;
+  sessionTime: string;
+  price: number;
+  status: string;
+}
+
 const Admin: React.FC = () => {
   const { user } = useAuth();
   const [movies, setMovies] = useState<Movie[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [cinemas, setCinemas] = useState<Cinema[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMovie, setEditingMovie] = useState<Movie | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -63,13 +92,40 @@ const Admin: React.FC = () => {
 
   useEffect(() => {
     if (user?.role === 'ADMIN') {
-      fetchMovies();
+      fetchData();
     }
   }, [user]);
 
-  const fetchMovies = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true);
+      setStatsLoading(true);
+      const token = localStorage.getItem('cinema_token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const [moviesRes, sessionsRes, cinemasRes, ticketsRes] = await Promise.all([
+        axios.get('http://localhost:8080/api/movies', { headers }),
+        axios.get('http://localhost:8080/api/sessions', { headers }),
+        axios.get('http://localhost:8080/api/cinemas', { headers }),
+        axios.get('http://localhost:8080/api/tickets', { headers })
+      ]);
+
+      setMovies(moviesRes.data);
+      setSessions(sessionsRes.data);
+      setCinemas(cinemasRes.data);
+      setTickets(ticketsRes.data);
+      setError('');
+    } catch (err: any) {
+      setError('Не удалось загрузить данные');
+      console.error(err);
+    } finally {
+      setLoading(false);
+      setStatsLoading(false);
+    }
+  };
+
+  const fetchMovies = async () => {
+    try {
       const token = localStorage.getItem('cinema_token');
       const response = await axios.get('http://localhost:8080/api/movies', {
         headers: {
@@ -77,13 +133,69 @@ const Admin: React.FC = () => {
         },
       });
       setMovies(response.data);
-      setError('');
     } catch (err: any) {
-      setError('Не удалось загрузить фильмы');
-      console.error(err);
-    } finally {
-      setLoading(false);
+      console.error('Ошибка загрузки фильмов:', err);
     }
+  };
+
+  const sortedMovies = useMemo(() => {
+      return [...movies].sort((a, b) => a.id - b.id);
+    }, [movies]);
+
+  const fetchSessions = async () => {
+    try {
+      const token = localStorage.getItem('cinema_token');
+      const response = await axios.get('http://localhost:8080/api/sessions', {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : undefined,
+        },
+      });
+      setSessions(response.data);
+    } catch (err: any) {
+      console.error('Ошибка загрузки сеансов:', err);
+    }
+  };
+
+  const fetchCinemas = async () => {
+    try {
+      const token = localStorage.getItem('cinema_token');
+      const response = await axios.get('http://localhost:8080/api/cinemas', {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : undefined,
+        },
+      });
+      setCinemas(response.data);
+    } catch (err: any) {
+      console.error('Ошибка загрузки кинотеатров:', err);
+    }
+  };
+
+  const fetchTickets = async () => {
+    try {
+      const token = localStorage.getItem('cinema_token');
+      const response = await axios.get('http://localhost:8080/api/tickets', {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : undefined,
+        },
+      });
+      setTickets(response.data);
+    } catch (err: any) {
+      console.error('Ошибка загрузки билетов:', err);
+    }
+  };
+
+  const countActiveSessions = () => {
+    const now = new Date();
+    return sessions.filter(session => {
+      const sessionTime = new Date(session.startTime);
+      return sessionTime > now;
+    }).length;
+  };
+
+  const countSoldTickets = () => {
+    return tickets.filter(ticket =>
+      ticket.status !== 'CANCELLED' && ticket.status !== 'CANCELED'
+    ).length;
   };
 
   const handleOpenDialog = (movie: Movie | null = null) => {
@@ -162,7 +274,6 @@ const Admin: React.FC = () => {
       };
 
       if (editingMovie) {
-        // Обновление фильма
         await axios.put(
           `http://localhost:8080/api/movies/${editingMovie.id}`,
           movieData,
@@ -174,7 +285,6 @@ const Admin: React.FC = () => {
         );
         setSuccessMessage('Фильм успешно обновлен');
       } else {
-        // Создание фильма
         await axios.post('http://localhost:8080/api/movies', movieData, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -183,7 +293,7 @@ const Admin: React.FC = () => {
         setSuccessMessage('Фильм успешно добавлен');
       }
 
-      await fetchMovies();
+      await fetchData();
       handleCloseDialog();
       setError('');
     } catch (err: any) {
@@ -208,7 +318,7 @@ const Admin: React.FC = () => {
         },
       });
 
-      await fetchMovies();
+      await fetchData();
       setDeleteDialogOpen(false);
       setMovieToDelete(null);
       setSuccessMessage('Фильм успешно удален');
@@ -221,6 +331,21 @@ const Admin: React.FC = () => {
   const handleCloseSnackbar = () => {
     setSuccessMessage('');
   };
+
+  const handleRefreshStats = () => {
+    fetchData();
+    setSnackbar({
+      open: true,
+      message: 'Статистика обновлена',
+      type: 'success'
+    });
+  };
+
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    type: 'success' as 'success' | 'error'
+  });
 
   if (user?.role !== 'ADMIN') {
     return (
@@ -243,38 +368,118 @@ const Admin: React.FC = () => {
         </Typography>
       </Box>
 
-      {/* Статистика */}
       <Box sx={{
         display: 'flex',
         flexWrap: 'wrap',
         gap: 3,
         mb: 4,
       }}>
-        {[
-          { value: movies.length.toString(), label: 'Фильмов в прокате' },
-          { value: '156', label: 'Билетов продано' },
-          { value: '24', label: 'Активных сеансов' },
-          { value: '2', label: 'Кинотеатров' },
-        ].map((stat, index) => (
-          <Paper key={index} sx={{
-            p: 3,
-            textAlign: 'center',
-            flex: 1,
-            minWidth: { xs: '100%', md: 'auto' }
-          }}>
-            <Typography variant="h4" color="primary">
-              {stat.value}
-            </Typography>
-            <Typography color="textSecondary">{stat.label}</Typography>
-          </Paper>
-        ))}
+        {statsLoading ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <Paper key={index} sx={{
+              p: 3,
+              textAlign: 'center',
+              flex: 1,
+              minWidth: { xs: '100%', md: 'auto' }
+            }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
+                <CircularProgress size={40} />
+              </Box>
+              <Typography color="textSecondary">
+                Загрузка...
+              </Typography>
+            </Paper>
+          ))
+        ) : (
+          [
+            {
+              value: movies.length.toString(),
+              label: 'Фильмов в прокате',
+              icon: '🎬',
+              color: 'primary.main'
+            },
+            {
+              value: countSoldTickets().toString(),
+              label: 'Билетов продано',
+              icon: '🎫',
+              color: 'success.main'
+            },
+            {
+              value: countActiveSessions().toString(),
+              label: 'Активных сеансов',
+              icon: '⏰',
+              color: 'warning.main'
+            },
+            {
+              value: cinemas.length.toString(),
+              label: 'Кинотеатров',
+              icon: '🏢',
+              color: 'info.main'
+            },
+          ].map((stat, index) => (
+            <Paper key={index} sx={{
+              p: 3,
+              textAlign: 'center',
+              flex: 1,
+              minWidth: { xs: '100%', sm: 'calc(50% - 12px)', md: 'calc(33.333% - 16px)', lg: 'auto' },
+              background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              transition: 'all 0.3s ease',
+              '&:hover': {
+                transform: 'translateY(-4px)',
+                borderColor: 'rgba(255, 58, 68, 0.3)',
+                boxShadow: '0 8px 32px rgba(255, 58, 68, 0.2)',
+              },
+            }}>
+              <Typography
+                variant="h4"
+                sx={{
+                  color: stat.color,
+                  mb: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 1
+                }}
+              >
+                <span>{stat.icon}</span>
+                {stat.value}
+              </Typography>
+              <Typography
+                variant="body2"
+                color="textSecondary"
+                sx={{ fontWeight: 500 }}
+              >
+                {stat.label}
+              </Typography>
+            </Paper>
+          ))
+        )}
       </Box>
 
-      {/* Быстрые действия */}
       <Paper sx={{ p: 3, mb: 4 }}>
-        <Typography variant="h6" gutterBottom>
-          Управление фильмами
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h6" gutterBottom>
+            Управление контентом
+          </Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handleRefreshStats}
+            disabled={statsLoading}
+            startIcon={<RefreshIcon />}
+            sx={{
+              color: '#FF3A44',
+              borderColor: '#FF3A44',
+              '&:hover': {
+                borderColor: '#FF6B73',
+                background: 'rgba(255, 58, 68, 0.1)',
+              },
+            }}
+          >
+            Обновить статистику
+          </Button>
+        </Box>
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           <Button
             variant="contained"
@@ -314,10 +519,9 @@ const Admin: React.FC = () => {
         </Box>
       </Paper>
 
-      {/* Список фильмов */}
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Список фильмов
+          Список фильмов ({movies.length})
         </Typography>
 
         {error && (
@@ -330,6 +534,10 @@ const Admin: React.FC = () => {
           <Box display="flex" justifyContent="center" py={4}>
             <CircularProgress />
           </Box>
+        ) : movies.length === 0 ? (
+          <Alert severity="info">
+            Фильмы отсутствуют. Добавьте первый фильм.
+          </Alert>
         ) : (
           <TableContainer>
             <Table>
@@ -344,21 +552,45 @@ const Admin: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {movies.map((movie) => (
-                  <TableRow key={movie.id}>
+                {sortedMovies.map((movie) => (
+                  <TableRow key={movie.id} hover>
                     <TableCell>{movie.id}</TableCell>
                     <TableCell>
-                      <Typography variant="subtitle2">{movie.title}</Typography>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        {movie.title}
+                      </Typography>
                       <Typography variant="body2" color="textSecondary">
                         {movie.description?.substring(0, 50)}...
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Chip label={movie.genre} size="small" />
+                      <Chip
+                        label={movie.genre}
+                        size="small"
+                        sx={{
+                          background: 'rgba(255, 58, 68, 0.1)',
+                          color: '#FF6B73',
+                          fontWeight: 500
+                        }}
+                      />
                     </TableCell>
                     <TableCell>{movie.duration} мин.</TableCell>
                     <TableCell>
-                      {movie.ageRating ? `${movie.ageRating}+` : 'Нет'}
+                      {movie.ageRating ? (
+                        <Chip
+                          label={`${movie.ageRating}+`}
+                          size="small"
+                          sx={{
+                            background: 'rgba(78, 205, 196, 0.1)',
+                            color: '#4ECDC4',
+                            fontWeight: 600
+                          }}
+                        />
+                      ) : (
+                        <Typography variant="body2" color="textSecondary">
+                          Нет
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Box sx={{ display: 'flex', gap: 1 }}>
@@ -367,6 +599,14 @@ const Admin: React.FC = () => {
                           startIcon={<EditIcon />}
                           variant="outlined"
                           onClick={() => handleOpenDialog(movie)}
+                          sx={{
+                            color: '#4ECDC4',
+                            borderColor: '#4ECDC4',
+                            '&:hover': {
+                              borderColor: '#7BD9D2',
+                              background: 'rgba(78, 205, 196, 0.1)',
+                            },
+                          }}
                         >
                           Редактировать
                         </Button>
@@ -376,6 +616,13 @@ const Admin: React.FC = () => {
                           variant="outlined"
                           color="error"
                           onClick={() => handleDeleteClick(movie)}
+                          sx={{
+                            borderColor: '#FF3A44',
+                            '&:hover': {
+                              borderColor: '#FF6B73',
+                              background: 'rgba(255, 58, 68, 0.1)',
+                            },
+                          }}
                         >
                           Удалить
                         </Button>
@@ -389,7 +636,6 @@ const Admin: React.FC = () => {
         )}
       </Paper>
 
-      {/* Диалог добавления/редактирования фильма */}
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle>
           {editingMovie ? 'Редактирование фильма' : 'Добавить новый фильм'}
@@ -484,7 +730,6 @@ const Admin: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Диалог подтверждения удаления */}
       <Dialog
         open={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
@@ -495,6 +740,9 @@ const Admin: React.FC = () => {
             Вы уверены, что хотите удалить фильм "{movieToDelete?.title}"?
             Это действие нельзя отменить.
           </Typography>
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            Все связанные сеансы также будут удалены!
+          </Alert>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)}>
@@ -510,7 +758,6 @@ const Admin: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Уведомление об успехе */}
       <Snackbar
         open={!!successMessage}
         autoHideDuration={3000}
@@ -527,8 +774,21 @@ const Admin: React.FC = () => {
           </IconButton>
         }
       />
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar({...snackbar, open: false})}
+        message={snackbar.message}
+      />
     </Container>
   );
 };
+
+const RefreshIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+  </svg>
+);
 
 export default Admin;
